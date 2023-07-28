@@ -2,7 +2,7 @@ import os
 import csv
 import json
 import win32com.client as win32
-from tkinter import Tk, filedialog, Button, Label, StringVar, Entry, Frame
+from tkinter import Tk, filedialog, Button, Label, StringVar, Entry, Frame, Checkbutton, BooleanVar
 
 class Application(Tk):
     def __init__(self):
@@ -13,12 +13,13 @@ class Application(Tk):
         self.input_dir = StringVar()
         self.output_dir = StringVar()
         self.bad_words_entries = []
+        self.match_all_word_forms = BooleanVar()  # Checkbox variable for "Match all word forms"
 
         default_bad_words = [
-            "ensure", "ensures", "assure", "assures", "insure", "insures",
-            "warrant", "warrantees", "warranty", "warrantee", "warrantees",
-            "guarant", "guaranties", "guarantee", "guarantees",
-            "certify", "certifies",
+            "ensure", "assure", "insure",
+            "warrant", "warranty", "warrantee",
+            "guarant", "guarantee",
+            "certify",
             "expert", "expertise",
             "best",
             "highest"
@@ -34,10 +35,13 @@ class Application(Tk):
             self.input_dir.set(data.get("input_dir", ""))
             self.output_dir.set(data.get("output_dir", ""))
             loaded_bad_words = data.get("bad_words", default_bad_words)
+            self.match_all_word_forms.set(data.get("match_all_word_forms", True))  # Load checkbox state
         except FileNotFoundError:
             with open("config.json", "w") as f:
-                json.dump({"bad_words": default_bad_words}, f)
+                json.dump({"bad_words": default_bad_words, "match_all_word_forms": True}, f)  # Save default checkbox state
             loaded_bad_words = default_bad_words
+
+        
 
         Button(self.main_frame, text="Select Input Folder", command=self.select_input_folder).pack()
         Label(self.main_frame, textvariable=self.input_dir).pack()
@@ -46,6 +50,8 @@ class Application(Tk):
         Label(self.main_frame, textvariable=self.output_dir).pack()
 
         Label(self.main_frame, text="Bad Words (search is case-insensitive):").pack()
+
+        Checkbutton(self.main_frame, text="Match all word forms", variable=self.match_all_word_forms).pack()
 
         self.words_frame = Frame(self.main_frame)
         self.words_frame.pack()
@@ -118,6 +124,7 @@ class Application(Tk):
             "input_dir": self.input_dir.get(),
             "output_dir": self.output_dir.get(),
             "bad_words": self.bad_words,
+            "match_all_word_forms": self.match_all_word_forms.get(),  # Save checkbox state
         }
         with open("config.json", "w") as f:
             json.dump(data, f)
@@ -129,6 +136,7 @@ class Application(Tk):
         rng.Find.Replacement.ClearFormatting()
         rng.Find.Replacement.Highlight = True
         rng.Find.MatchCase = False  # Make it case-insensitive
+        rng.Find.MatchAllWordForms = self.match_all_word_forms.get()
 
         rng.Find.Execute(
             FindText=word,
@@ -139,6 +147,7 @@ class Application(Tk):
             Replace=win32.constants.wdReplaceAll,
         )
         word_count += rng.Find.Found
+        
         return word_count
 
 if __name__ == "__main__":

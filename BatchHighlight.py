@@ -3,6 +3,8 @@ import csv
 import json
 import win32com.client as win32
 from tkinter import Tk, filedialog, Button, Label, StringVar, Entry, Frame, Checkbutton, BooleanVar
+import fitz  # PyMuPDF
+from collections import defaultdict
 
 class Application(Tk):
     def __init__(self):
@@ -37,11 +39,9 @@ class Application(Tk):
             loaded_bad_words = data.get("bad_words", default_bad_words)
             self.match_all_word_forms.set(data.get("match_all_word_forms", True))  # Load checkbox state
         except FileNotFoundError:
-            with open("config.json", "w") as f:
-                json.dump({"bad_words": default_bad_words, "match_all_word_forms": True}, f)  # Save default checkbox state
+            self.match_all_word_forms.set(True)  # Enable checkbox by default
             loaded_bad_words = default_bad_words
-
-        
+            self.save_json()
 
         Button(self.main_frame, text="Select Input Folder", command=self.select_input_folder).pack()
         Label(self.main_frame, textvariable=self.input_dir).pack()
@@ -49,9 +49,9 @@ class Application(Tk):
         Button(self.main_frame, text="Select Output Folder", command=self.select_output_folder).pack()
         Label(self.main_frame, textvariable=self.output_dir).pack()
 
-        Label(self.main_frame, text="Bad Words (search is case-insensitive):").pack()
+        Label(self.main_frame, text="Bad Words:").pack()
 
-        Checkbutton(self.main_frame, text="Match all word forms", variable=self.match_all_word_forms).pack()
+        Checkbutton(self.main_frame, text="Match all word forms for Word documents", variable=self.match_all_word_forms).pack()
 
         self.words_frame = Frame(self.main_frame)
         self.words_frame.pack()
@@ -62,6 +62,8 @@ class Application(Tk):
         Button(self.main_frame, text="Add Word", command=self.add_word_entry).pack(padx=10, pady=10)
         Button(self.main_frame, text="Remove Word", command=self.remove_word_entry).pack()
 
+        Label(self.main_frame, text="The search is case-insensitive and PDF files will be searched just on basic match \nso any word containing one of the above entries will be highlighted.").pack()
+
         Button(self.main_frame, text="Run", command=self.run).pack(padx=10, pady=10)
 
     def select_input_folder(self):
@@ -71,7 +73,6 @@ class Application(Tk):
     def select_output_folder(self):
         self.output_dir.set(filedialog.askdirectory())
         self.save_json()
-        
 
     def add_word_entry(self, word=None):
         new_bad_word = StringVar()
@@ -88,34 +89,66 @@ class Application(Tk):
         self.save_json()
 
     def run(self):
-        result_file_path = os.path.normpath(os.path.join(self.output_dir.get(), "result.csv"))
-        result_file = open(result_file_path, 'w', newline='')
-        csv_writer = csv.writer(result_file)
-        csv_writer.writerow(["File", "Bad words count"])
+        result_file_path = os.path.normpath(os.path.join(self.output_dir.get(), "counts.csv"))
+        
+        overall_result = {}
 
         for file_name in os.listdir(self.input_dir.get()):
+            full_path = os.path.normpath(os.path.join(self.input_dir.get(), file_name))
+            word_counts_dict = defaultdict(int)  # Keep track of counts for each bad word
+
             if file_name.endswith(('.doc', '.docx', '.docm')):
-                full_path = os.path.normpath(os.path.join(self.input_dir.get(), file_name))
                 try:
                     doc = self.word.Documents.Open(full_path)
-                    word_count = 0
                     for word in self.bad_words:
-                        count = self.highlight_word(doc, word)
-                        word_count += count
-                    if word_count > 0:
+                        word_count = self.highlight_word(doc, word)  # Get both count and details
+                        word_counts_dict[word] += word_count
+                    if sum(word_counts_dict.values()) > 0:  # If any bad words found
                         output_path = os.path.normpath(os.path.join(self.output_dir.get(), file_name))
                         doc.SaveAs(output_path)
-                        csv_writer.writerow([file_name, word_count])
+                        overall_result[file_name] = {'Bad words count': sum(word_counts_dict.values()), 
+                                                    'Details': dict(word_counts_dict)}
                     doc.Close()
                 except Exception as e:
                     print(f"Error processing file {full_path}: {str(e)}")
+            elif file_name.endswith('.pdf'):
+                try:
+                    doc = fitz.open(full_path)
+                    word_count, word_detail = self.highlight_word_pdf(doc, self.bad_words) # Update here
+                    if word_count > 0:
+                        output_path = os.path.normpath(os.path.join(self.output_dir.get(), file_name))
+                        doc.save(output_path)
+                        overall_result[file_name] = {'Bad words count': word_count, 'Details': word_detail} # Update here
+                except Exception as e:
+                    print(f"Error processing file {full_path}: {str(e)}")
 
-        result_file.close()
+        # Save CSV file
+        with open(result_file_path, "w", newline='') as f:
+            writer = csv.writer(f)
+            # Write the header row
+            header_row = ['File Name'] + self.bad_words + ['Total Count']
+            writer.writerow(header_row)
+            # Write the data rows
+            for file_name, data in overall_result.items():
+                row = [file_name] + [data['Details'].get(word, 0) for word in self.bad_words] + [data['Bad words count']]
+                writer.writerow(row)
+        
         self.word.Quit()
         os.startfile(result_file_path)
         os.startfile(self.output_dir.get())  # open the output directory
 
         self.save_json()
+
+
+    def highlight_word_pdf(self, doc, words):
+        word_counts_dict = defaultdict(int)  # Keep track of counts for each bad word
+        for word in words: # Loop over each word
+            for page in doc:
+                text_instances = page.search_for(word)
+                for inst in text_instances:
+                    page.add_highlight_annot(inst)
+                    word_counts_dict[word] += 1
+        return sum(word_counts_dict.values()), dict(word_counts_dict)
 
     def save_json(self):
         self.bad_words = [entry.get().strip() for entry in self.bad_words_entries]
@@ -137,18 +170,32 @@ class Application(Tk):
         rng.Find.Replacement.Highlight = True
         rng.Find.MatchCase = False  # Make it case-insensitive
         rng.Find.MatchAllWordForms = self.match_all_word_forms.get()
-
-        rng.Find.Execute(
+        
+        found = rng.Find.Execute(
             FindText=word,
             MatchWholeWord=True,
             Forward=True,
-            Wrap=win32.constants.wdFindContinue,
+            Wrap=win32.constants.wdFindStop,  # Stop at the end of the document
             Format=True,
-            Replace=win32.constants.wdReplaceAll,
+            Replace=win32.constants.wdReplaceOne,  # Replace one instance at a time
         )
-        word_count += rng.Find.Found
         
+        while found:
+            word_count += 1
+            rng.Collapse(Direction=win32.constants.wdCollapseEnd)  # Collapse the range past the found word
+            found = rng.Find.Execute(
+                FindText=word,
+                MatchWholeWord=True,
+                Forward=True,
+                Wrap=win32.constants.wdFindStop,
+                Format=True,
+                Replace=win32.constants.wdReplaceOne,
+            )
+
         return word_count
+
+
+
 
 if __name__ == "__main__":
     app = Application()

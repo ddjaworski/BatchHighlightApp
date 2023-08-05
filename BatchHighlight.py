@@ -16,6 +16,7 @@ class Application(Tk):
         self.output_dir = StringVar()
         self.bad_words_entries = []
         self.match_all_word_forms = BooleanVar()  # Checkbox variable for "Match all word forms"
+        self.trim_spaces = BooleanVar()
 
         default_bad_words = [
             "ensure", "assure", "insure",
@@ -38,8 +39,10 @@ class Application(Tk):
             self.output_dir.set(data.get("output_dir", ""))
             loaded_bad_words = data.get("bad_words", default_bad_words)
             self.match_all_word_forms.set(data.get("match_all_word_forms", True))  # Load checkbox state
+            self.trim_spaces.set(data.get("trim_spaces", True))  # Load checkbox state
         except FileNotFoundError:
             self.match_all_word_forms.set(True)  # Enable checkbox by default
+            self.trim_spaces.set(True)  # Enable checkbox by default
             loaded_bad_words = default_bad_words
             self.save_json()
 
@@ -52,6 +55,8 @@ class Application(Tk):
         Label(self.main_frame, text="Bad Words:").pack()
 
         Checkbutton(self.main_frame, text="Match all word forms for Word documents", variable=self.match_all_word_forms).pack()
+
+        Checkbutton(self.main_frame, text="Trim spaces before and after words below for PDF search", variable=self.trim_spaces).pack()
 
         self.words_frame = Frame(self.main_frame)
         self.words_frame.pack()
@@ -74,7 +79,7 @@ class Application(Tk):
         self.output_dir.set(filedialog.askdirectory())
         self.save_json()
 
-    def add_word_entry(self, word=None):
+    def add_word_entry(self, word=None) -> None:
         new_bad_word = StringVar()
         new_bad_word.set(word or "")
         new_entry = Entry(self.words_frame, textvariable=new_bad_word)
@@ -151,18 +156,24 @@ class Application(Tk):
         return sum(word_counts_dict.values()), dict(word_counts_dict)
 
     def save_json(self):
-        self.bad_words = [entry.get().strip() for entry in self.bad_words_entries]
+
+        if self.trim_spaces.get():
+            self.bad_words = [entry.get().strip() for entry in self.bad_words_entries]
+        else:
+            self.bad_words = [entry.get() for entry in self.bad_words_entries]
 
         data = {
             "input_dir": self.input_dir.get(),
             "output_dir": self.output_dir.get(),
             "bad_words": self.bad_words,
             "match_all_word_forms": self.match_all_word_forms.get(),  # Save checkbox state
+            "trim_spaces": self.trim_spaces.get()
         }
         with open("config.json", "w") as f:
             json.dump(data, f)
 
-    def highlight_word(self, doc, word):
+    def highlight_word(self, doc, word: str):
+        word = word.strip()
         word_count = 0
         rng = doc.Range()
         rng.Find.ClearFormatting()

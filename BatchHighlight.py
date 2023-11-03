@@ -94,8 +94,9 @@ class Application(Tk):
         self.save_json()
 
     def run(self):
+        self.word = win32.gencache.EnsureDispatch('Word.Application')
         result_file_path = os.path.normpath(os.path.join(self.output_dir.get(), "counts.csv"))
-        
+
         overall_result = {}
 
         for file_name in os.listdir(self.input_dir.get()):
@@ -105,6 +106,7 @@ class Application(Tk):
             if file_name.endswith(('.doc', '.docx', '.docm')):
                 try:
                     doc = self.word.Documents.Open(full_path)
+                    self.word.ActiveDocument.ActiveWindow.View.Type = 3
                     for word in self.bad_words:
                         word_count = self.highlight_word(doc, word)  # Get both count and details
                         word_counts_dict[word] += word_count
